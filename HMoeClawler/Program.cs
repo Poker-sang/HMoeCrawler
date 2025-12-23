@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using HMoeClawler.LocalModels;
 using HMoeClawler.Models;
 
 // 记录日志路径
@@ -54,23 +55,23 @@ client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; W
 _ = client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", settings.Cookies);
 
 var postIdSet = new HashSet<int>(1000);
-LinkedList<Post> postList = null!;
+MyPostsList postList = null!;
 
 if (File.Exists(loggerJsonPath))
 {
     await using var fs = OpenAsyncRead(loggerJsonPath, FileMode.Open);
-    if (await JsonSerializer.DeserializeAsync<LinkedList<Post>>(fs) is { } r)
+    if (await JsonSerializer.DeserializeAsync<MyPostsList>(fs) is { } r)
     {
-        postList = r;
-        var imgTasks = new List<Task>(postList.Count);
-        foreach (var post in postList)
+        postList = r with { Posts = new(r.Posts.Take(100)) };
+        var imgTasks = new List<Task>(postList.Posts.Count);
+        foreach (var post in postList.Posts)
             if (postIdSet.Add(post.Id))
                 imgTasks.Add(DownloadThumbnail(client, post));
         await Task.WhenAll(imgTasks);
     }
 }
 
-postList ??= [];
+postList ??= new() { Posts = [] };
 
 if (settings.Nonce is not { } nonce)
 {
@@ -128,7 +129,8 @@ while (true)
             Console.WriteLine($"New Item [{post.Id}]: {post.Url}");
             if (continuousExistence < continuousExistenceThreshold)
                 continuousExistence = 0;
-            postList.AddFirst(post);
+            postList.Posts.AddFirst(post);
+            postList.NewPostsCount++;
             imgDownloadTasks.Add(DownloadThumbnail(client, post));
         }
         else
@@ -184,9 +186,8 @@ return;
 static async Task DownloadThumbnail(HttpClient client, Post post)
 {
     var postThumbnailUrl = post.Thumbnail.Url;
-    var extension = Path.GetExtension(postThumbnailUrl.AbsolutePath);
-    var fileName = post.Id + extension;
-    var imgPath = Path.Combine(loggerImgPath, fileName);
+    var fileName = post.ThumbnailFileName;
+    var imgPath = Path.Combine(loggerImgPath, post.ThumbnailFileName);
     if (File.Exists(imgPath))
         return;
     try
@@ -199,7 +200,7 @@ static async Task DownloadThumbnail(HttpClient client, Post post)
     catch (Exception e)
     {
         WriteException(e);
-        Console.WriteLine($"Download thumbnail failed [{post.Id}]: {postThumbnailUrl}");
+        Console.WriteLine($"Download thumbnail failed [{post.Id}]: {postThumbnailUrl} ({post.Url})");
         if (File.Exists(imgPath))
             File.Delete(imgPath);
     }
