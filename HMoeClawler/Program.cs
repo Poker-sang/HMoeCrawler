@@ -6,12 +6,10 @@ using System.Text.Json;
 using HMoeClawler.LocalModels;
 using HMoeClawler.Models;
 
-// 记录日志路径
-const string loggerPath = @"D:\new\HMoeLogger";
-const string loggerImgPath = loggerPath+ "\\img";
-const string loggerJsonPath = loggerPath + "\\CurrLog.json";
-const string loggerLastJsonPath = loggerPath+ "\\LastLog.json";
-const string loggerSettingsPath = loggerPath+ "\\Settings.json";
+// 是否为新会话
+// true时，将读到的NewPostsCount清零，并从头开始计数新项目
+// false时，继续在已有NewPostsCount基础上计数新项目
+const bool newSession = true;
 // 每次请求时间间隔
 var defaultCoolDown = TimeSpan.FromSeconds(3);
 // 最大请求间隔，超过后中断
@@ -21,6 +19,13 @@ const int continuousExistenceThreshold = 5;
 // 网站每页项目数（20）
 const int itemsPerPage = 20;
 Settings settings = null!;
+
+// 记录日志路径
+const string loggerPath = @"D:\new\HMoeLogger";
+const string loggerImgPath = loggerPath+ "\\img";
+const string loggerJsonPath = loggerPath + "\\CurrLog.json";
+const string loggerLastJsonPath = loggerPath+ "\\LastLog.json";
+const string loggerSettingsPath = loggerPath+ "\\Settings.json";
 
 _ = Directory.CreateDirectory(loggerImgPath);
 
@@ -55,23 +60,27 @@ client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; W
 _ = client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", settings.Cookies);
 
 var postIdSet = new HashSet<int>(1000);
-MyPostsList postList = null!;
+LinkedList<Post>? postList = null;
+var originalCount = 0;
+var newPostsCount = 0;
 
 if (File.Exists(loggerJsonPath))
 {
     await using var fs = OpenAsyncRead(loggerJsonPath, FileMode.Open);
-    if (await JsonSerializer.DeserializeAsync<MyPostsList>(fs) is { } r)
+    if (await JsonSerializer.DeserializeAsync<ReadPostsList>(fs) is { } r)
     {
-        postList = r with { Posts = new(r.Posts.Take(100)) };
-        var imgTasks = new List<Task>(postList.Posts.Count);
-        foreach (var post in postList.Posts)
+        postList = r.Posts;
+        if (!newSession)
+            originalCount = newPostsCount = r.NewPostsCount;
+        var imgTasks = new List<Task>(postList.Count);
+        foreach (var post in postList)
             if (postIdSet.Add(post.Id))
                 imgTasks.Add(DownloadThumbnail(client, post));
         await Task.WhenAll(imgTasks);
     }
 }
 
-postList ??= new() { Posts = [] };
+postList ??= [];
 
 if (settings.Nonce is not { } nonce)
 {
@@ -129,8 +138,8 @@ while (true)
             Console.WriteLine($"New Item [{post.Id}]: {post.Url}");
             if (continuousExistence < continuousExistenceThreshold)
                 continuousExistence = 0;
-            postList.Posts.AddFirst(post);
-            postList.NewPostsCount++;
+            postList.AddFirst(post);
+            newPostsCount++;
             imgDownloadTasks.Add(DownloadThumbnail(client, post));
         }
         else
@@ -142,20 +151,32 @@ while (true)
     await Task.WhenAll(imgDownloadTasks);
 
     if (continuousExistence >= continuousExistenceThreshold)
-    {
-        Console.WriteLine("\e[32mReached continuous existence threshold. Stopping crawl.\e[0m");
         break;
-    }
 
     while (DateTime.UtcNow < lastRequest + coolDown)
         await Task.Delay(500);
     data.Paged++;
 }
 
+Console.WriteLine("\e[32mReached continuous existence threshold. Stopping crawl.");
+Console.Write("Get ");
+if (newSession)
+    Console.Write(newPostsCount);
+else
+    Console.Write(originalCount + " + " + (newPostsCount - originalCount));
+Console.WriteLine(" new items\e[0m");
+
 JsonSerializerOptions options = new()
 {
     WriteIndented = true,
     Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+};
+
+var resultPosts = postList.OrderByDescending(t => t.Date);
+var myList = new WritePostsList
+{
+    NewPostsCount = newPostsCount,
+    Posts = resultPosts.Take(newPostsCount + continuousExistenceThreshold)
 };
 
 try
@@ -169,7 +190,7 @@ try
 
     Console.WriteLine("Saving " + loggerJsonPath);
     await using var fs = OpenAsyncWrite(loggerJsonPath, FileMode.CreateNew);
-    await JsonSerializer.SerializeAsync(fs, postList, options);
+    await JsonSerializer.SerializeAsync(fs, myList, options);
 }
 catch (Exception e)
 {
@@ -178,7 +199,7 @@ catch (Exception e)
     Console.WriteLine($"\e[31mSave failed. Backing up {fileName}\e[0m");
     var loggerTempJsonPath = Path.Combine(loggerPath, fileName);
     await using var fs = OpenAsyncWrite(loggerTempJsonPath, FileMode.CreateNew);
-    await JsonSerializer.SerializeAsync(fs, postList, options);
+    await JsonSerializer.SerializeAsync(fs, myList, options);
 }
 
 return;

@@ -1,12 +1,17 @@
-using System.Text.Json.Serialization;
 using HMoeClawler.Models;
 
 namespace HMoeClawler.LocalModels;
 
-public record MyPostsList
+public record ReadPostsList
 {
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenReading)]
-    public int NewPostsCount { get; set; }
+    public required int NewPostsCount { get; init; }
 
     public required LinkedList<Post> Posts { get; init; }
+}
+
+public record WritePostsList
+{
+    public required int NewPostsCount { get; init; }
+
+    public required IEnumerable<Post> Posts { get; init; }
 }
