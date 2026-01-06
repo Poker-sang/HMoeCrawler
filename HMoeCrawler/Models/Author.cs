@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace HMoeClawler.Models;
+namespace HMoeCrawler.Models;
 
 public record Author
 {

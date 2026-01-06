@@ -1,4 +1,4 @@
-namespace HMoeClawler.LocalModels;
+namespace HMoeCrawler.LocalModels;
 
 public record Settings
 {

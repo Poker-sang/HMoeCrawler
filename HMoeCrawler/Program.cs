@@ -3,8 +3,9 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using HMoeClawler.LocalModels;
-using HMoeClawler.Models;
+using HMoeCrawler;
+using HMoeCrawler.LocalModels;
+using HMoeCrawler.Models;
 
 // 是否为新会话
 // true时，将读到的NewPostsCount清零，并从头开始计数新项目
@@ -38,7 +39,7 @@ if (!File.Exists(loggerSettingsPath))
 //     "Nonce": "..." // Optional
 // }
 
-await using (var fs = OpenAsyncRead(loggerSettingsPath, FileMode.Open))
+await using (var fs = File.OpenAsyncRead(loggerSettingsPath, FileMode.Open))
 {
     try
     {
@@ -66,7 +67,7 @@ var newPostsCount = 0;
 
 if (File.Exists(loggerJsonPath))
 {
-    await using var fs = OpenAsyncRead(loggerJsonPath, FileMode.Open);
+    await using var fs = File.OpenAsyncRead(loggerJsonPath, FileMode.Open);
     if (await JsonSerializer.DeserializeAsync<ReadPostsList>(fs) is { } r)
     {
         postList = r.Posts;
@@ -189,7 +190,7 @@ try
     }
 
     Console.WriteLine("Saving " + loggerJsonPath);
-    await using var fs = OpenAsyncWrite(loggerJsonPath, FileMode.CreateNew);
+    await using var fs = File.OpenAsyncWrite(loggerJsonPath, FileMode.CreateNew);
     await JsonSerializer.SerializeAsync(fs, myList, options);
 }
 catch (Exception e)
@@ -198,7 +199,7 @@ catch (Exception e)
     var fileName = $"TempLog {DateTime.Now:yyyy.MM.dd HH-mm-ss}.json";
     Console.WriteLine($"\e[31mSave failed. Backing up {fileName}\e[0m");
     var loggerTempJsonPath = Path.Combine(loggerPath, fileName);
-    await using var fs = OpenAsyncWrite(loggerTempJsonPath, FileMode.CreateNew);
+    await using var fs = File.OpenAsyncWrite(loggerTempJsonPath, FileMode.CreateNew);
     await JsonSerializer.SerializeAsync(fs, myList, options);
 }
 
@@ -214,7 +215,7 @@ static async Task DownloadThumbnail(HttpClient client, Post post)
     try
     {
         await using var stream = await client.GetStreamAsync(postThumbnailUrl);
-        await using var fileStream = OpenAsyncWrite(imgPath, FileMode.CreateNew);
+        await using var fileStream = File.OpenAsyncWrite(imgPath, FileMode.CreateNew);
         await stream.CopyToAsync(fileStream);
         Console.WriteLine("Downloaded thumbnail " + fileName);
     }
@@ -241,14 +242,5 @@ static SearchData? Decode(string data)
     var u8Str = Encoding.UTF8.GetString(Convert.FromBase64String(data));
     return JsonSerializer.Deserialize<SearchData>(u8Str);
 }
-
-static FileStream OpenAsyncRead(string path, FileMode mode)
-    => new(path, mode, FileAccess.Read, FileShare.Read, 4096, true);
-
-static FileStream OpenAsyncWrite(string path, FileMode mode)
-    => new(path, mode, FileAccess.ReadWrite, FileShare.None, 4096, true);
-
-static FileStream OpenAsyncStream(string path, FileMode mode, FileAccess access, FileShare share)
-    => new(path, mode, access, share, 4096, true);
 
 static void WriteException(Exception e) => Console.WriteLine($"\e[90m{e.Message}\e[0m");

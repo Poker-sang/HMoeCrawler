@@ -1,6 +1,6 @@
-using HMoeClawler.Models;
+using HMoeCrawler.Models;
 
-namespace HMoeClawler.LocalModels;
+namespace HMoeCrawler.LocalModels;
 
 public record ReadPostsList
 {

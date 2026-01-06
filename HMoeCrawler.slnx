@@ -2,5 +2,5 @@
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />
   </Folder>
-  <Project Path="HMoeClawler/HMoeClawler.csproj" />
+  <Project Path="HMoeCrawler/HMoeCrawler.csproj" />
 </Solution>

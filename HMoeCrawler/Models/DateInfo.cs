@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace HMoeClawler.Models;
+namespace HMoeCrawler.Models;
 
 public record struct DateInfo
 {
