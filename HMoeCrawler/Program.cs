@@ -23,10 +23,10 @@ Settings settings = null!;
 
 // 记录日志路径
 const string loggerPath = @"D:\new\HMoeLogger";
-const string loggerImgPath = loggerPath+ "\\img";
+const string loggerImgPath = loggerPath + "\\img";
 const string loggerJsonPath = loggerPath + "\\CurrLog.json";
-const string loggerLastJsonPath = loggerPath+ "\\LastLog.json";
-const string loggerSettingsPath = loggerPath+ "\\Settings.json";
+const string loggerLastJsonPath = loggerPath + "\\LastLog.json";
+const string loggerSettingsPath = loggerPath + "\\Settings.json";
 
 _ = Directory.CreateDirectory(loggerImgPath);
 
@@ -56,6 +56,7 @@ if (settings is null)
     throw new InvalidDataException("Invalid settings " + loggerSettingsPath);
 
 using var client = new HttpClient();
+client.Timeout = TimeSpan.FromSeconds(8);
 client.DefaultRequestHeaders.Referrer = new("https://www.mhh1.com/search/-");
 client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0");
 _ = client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", settings.Cookies);
@@ -64,6 +65,7 @@ var postIdSet = new HashSet<int>(1000);
 LinkedList<Post>? postList = null;
 var originalCount = 0;
 var newPostsCount = 0;
+var imgTasks = new List<Task>();
 
 if (File.Exists(loggerJsonPath))
 {
@@ -73,11 +75,9 @@ if (File.Exists(loggerJsonPath))
         postList = r.Posts;
         if (!newSession)
             originalCount = newPostsCount = r.NewPostsCount;
-        var imgTasks = new List<Task>(postList.Count);
         foreach (var post in postList)
             if (postIdSet.Add(post.Id))
                 imgTasks.Add(DownloadThumbnail(client, post));
-        await Task.WhenAll(imgTasks);
     }
 }
 
@@ -131,8 +131,6 @@ while (true)
             await Task.Delay(coolDown);
         }
 
-    var imgDownloadTasks = new List<Task>(itemsPerPage);
-
     while (tempPosts.TryPop(out var post))
         if (postIdSet.Add(post.Id))
         {
@@ -141,15 +139,13 @@ while (true)
                 continuousExistence = 0;
             postList.AddFirst(post);
             newPostsCount++;
-            imgDownloadTasks.Add(DownloadThumbnail(client, post));
+            imgTasks.Add(DownloadThumbnail(client, post));
         }
         else
         {
             Console.WriteLine($"Item existed: {post.Id} Continuous existence count: {continuousExistence}");
             continuousExistence++;
         }
-
-    await Task.WhenAll(imgDownloadTasks);
 
     if (continuousExistence >= continuousExistenceThreshold)
         break;
@@ -159,8 +155,11 @@ while (true)
     data.Paged++;
 }
 
-Console.WriteLine("\e[32mReached continuous existence threshold. Stopping crawl.");
-Console.Write("Get ");
+Console.WriteLine("\e[32mReached continuous existence threshold. Stopping crawl. Waiting for the thumbnail download task to complete\e[0m");
+
+await Task.WhenAll(imgTasks);
+
+Console.Write("\e[32mGet ");
 if (newSession)
     Console.Write(newPostsCount);
 else
