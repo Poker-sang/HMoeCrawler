@@ -175,8 +175,8 @@ JsonSerializerOptions options = new()
 var resultPosts = postList.OrderByDescending(t => t.Date);
 var myList = new WritePostsList
 {
-    NewPostsCount = newPostsCount,
-    Posts = resultPosts.Take(newPostsCount + continuousExistenceThreshold)
+    NewPostsCount = newPostsCount - continuousExistenceThreshold,
+    Posts = resultPosts.Take(newPostsCount)
 };
 
 try
