@@ -18,15 +18,21 @@ var coolDownThreshold = TimeSpan.FromMinutes(1);
 // 连续获取到n个已存在的项目后，停止爬取
 const int continuousExistenceThreshold = 5;
 // 网站每页项目数（20）
-const int itemsPerPage = 20;
-Settings settings = null!;
+// const int itemsPerPage = 20;
+Settings? settings = null;
 
 // 记录日志路径
-const string loggerPath = @"D:\new\HMoeLogger";
-const string loggerImgPath = loggerPath + "\\img";
-const string loggerJsonPath = loggerPath + "\\CurrLog.json";
-const string loggerLastJsonPath = loggerPath + "\\LastLog.json";
-const string loggerSettingsPath = loggerPath + "\\Settings.json";
+const string loggerPath = @"D:\new\HMoeLogger\";
+const string loggerImgPath = loggerPath + "img";
+const string loggerJsonPath = loggerPath + "CurrLog.json";
+const string loggerLastJsonPath = loggerPath + "LastLog.json";
+const string loggerSettingsPath = loggerPath + "Settings.json";
+
+var options = new JsonSerializerOptions
+{
+    WriteIndented = true,
+    Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+};
 
 _ = Directory.CreateDirectory(loggerImgPath);
 
@@ -36,7 +42,6 @@ if (!File.Exists(loggerSettingsPath))
 // {
 //     "Cookies": "...",
 //     "NonceParam": "action=...", // https://www.mhh1.com/wp-admin/admin-ajax.php?
-//     "Nonce": "..." // Optional
 // }
 
 await using (var fs = File.OpenAsyncRead(loggerSettingsPath, FileMode.Open))
@@ -83,14 +88,11 @@ if (File.Exists(loggerJsonPath))
 
 postList ??= [];
 
-if (settings.Nonce is not { } nonce)
-{
-    Console.WriteLine("Fetching nonce ");
-    using var nonceJson = await client.GetAsync("https://www.mhh1.com/wp-admin/admin-ajax.php?" + settings.NonceParam);
-    _ = nonceJson.EnsureSuccessStatusCode();
-    using var jsonDocument = await JsonDocument.ParseAsync(nonceJson.Content.ReadAsStream());
-    nonce = jsonDocument.RootElement.GetProperty("_nonce").GetString();
-}
+Console.WriteLine("Fetching nonce ");
+using var nonceJson = await client.GetAsync("https://www.mhh1.com/wp-admin/admin-ajax.php?" + settings.NonceParam);
+_ = nonceJson.EnsureSuccessStatusCode();
+using var jsonDocument = await JsonDocument.ParseAsync(nonceJson.Content.ReadAsStream());
+var nonce = jsonDocument.RootElement.GetProperty("_nonce").GetString();
 
 Console.WriteLine("Get nonce " + nonce);
 
@@ -113,6 +115,23 @@ while (true)
             Console.WriteLine("Downloading page " + data.Paged);
             using var response = await client.GetAsync(uri + Encode(data));
             _ = response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadAsStringAsync();
+
+            if (result.Contains("请登录后继续"))
+            {
+                Console.WriteLine("\e[31mCookies expired, please update cookies in Settings.json\e[0m");
+                Console.WriteLine("Paste new cookie in HeaderString:");
+                var newCookies = Console.ReadLine()?.Trim();
+                if (!string.IsNullOrWhiteSpace(newCookies))
+                {
+                    settings = settings with { Cookies = newCookies };
+                    await using var fs = File.OpenAsyncWrite(loggerSettingsPath, FileMode.Create);
+                    await JsonSerializer.SerializeAsync(fs, settings, options);
+                    Console.WriteLine("\e[32mSettings.json updated. Restart the program\e[0m");
+                }
+                return;
+            }
+
             if (await response.Content.ReadFromJsonAsync<ApiResponse>() is { Data.Posts: { } p })
             {
                 Console.WriteLine("Downloaded page " + data.Paged);
@@ -166,17 +185,11 @@ else
     Console.Write(originalCount + " + " + (newPostsCount - originalCount));
 Console.WriteLine(" new items\e[0m");
 
-JsonSerializerOptions options = new()
-{
-    WriteIndented = true,
-    Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-};
-
 var resultPosts = postList.OrderByDescending(t => t.Date);
 var myList = new WritePostsList
 {
-    NewPostsCount = newPostsCount - continuousExistenceThreshold,
-    Posts = resultPosts.Take(newPostsCount)
+    NewPostsCount = newPostsCount,
+    Posts = resultPosts.Take(newPostsCount + continuousExistenceThreshold)
 };
 
 try
