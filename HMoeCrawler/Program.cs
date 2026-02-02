@@ -1,16 +1,19 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Threading.Tasks;
 using HMoeCrawler;
 using HMoeCrawler.LocalModels;
 using HMoeCrawler.Models;
 
-// 是否为新会话
-// true时，将读到的NewPostsCount清零，并从头开始计数新项目
-// false时，继续在已有NewPostsCount基础上计数新项目
-const bool newSession = true;
 // 每次请求时间间隔
 var defaultCoolDown = TimeSpan.FromSeconds(3);
 // 最大请求间隔，超过后中断
@@ -22,17 +25,11 @@ const int continuousExistenceThreshold = 5;
 Settings? settings = null;
 
 // 记录日志路径
-const string loggerPath = @"D:\new\HMoeLogger\";
-const string loggerImgPath = loggerPath + "img";
-const string loggerJsonPath = loggerPath + "CurrLog.json";
-const string loggerLastJsonPath = loggerPath + "LastLog.json";
-const string loggerSettingsPath = loggerPath + "Settings.json";
-
-var options = new JsonSerializerOptions
-{
-    WriteIndented = true,
-    Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-};
+var loggerPath = Environment.CurrentDirectory;
+var loggerImgPath = Path.Combine(loggerPath, "img");
+var loggerJsonPath = Path.Combine(loggerPath, "current.json");
+var loggerLastJsonPath = Path.Combine(loggerPath, "last.json");
+var loggerSettingsPath = Path.Combine(loggerPath, "settings.json");
 
 _ = Directory.CreateDirectory(loggerImgPath);
 
@@ -40,6 +37,7 @@ if (!File.Exists(loggerSettingsPath))
     throw new("Missing Settings in " + loggerSettingsPath);
 
 // {
+//     "NewSession": bool,
 //     "Cookies": "...",
 //     "NonceParam": "action=...", // https://www.mhh1.com/wp-admin/admin-ajax.php?
 // }
@@ -48,7 +46,7 @@ await using (var fs = File.OpenAsyncRead(loggerSettingsPath, FileMode.Open))
 {
     try
     {
-        if (await JsonSerializer.DeserializeAsync<Settings>(fs) is { } s)
+        if (await JsonSerializer.DeserializeAsync(fs, SerializerContext.DefaultOverride.Settings) is { } s)
             settings = s;
     }
     catch (Exception e)
@@ -75,10 +73,10 @@ var imgTasks = new List<Task>();
 if (File.Exists(loggerJsonPath))
 {
     await using var fs = File.OpenAsyncRead(loggerJsonPath, FileMode.Open);
-    if (await JsonSerializer.DeserializeAsync<ReadPostsList>(fs) is { } r)
+    if (await JsonSerializer.DeserializeAsync(fs, SerializerContext.DefaultOverride.ReadPostsList) is { } r)
     {
         postList = r.Posts;
-        if (!newSession)
+        if (!settings.NewSession)
             originalCount = newPostsCount = r.NewPostsCount;
         foreach (var post in postList)
             if (postIdSet.Add(post.Id))
@@ -126,13 +124,13 @@ while (true)
                 {
                     settings = settings with { Cookies = newCookies };
                     await using var fs = File.OpenAsyncWrite(loggerSettingsPath, FileMode.Create);
-                    await JsonSerializer.SerializeAsync(fs, settings, options);
+                    await JsonSerializer.SerializeAsync(fs, settings, SerializerContext.DefaultOverride.Settings);
                     Console.WriteLine("\e[32mSettings.json updated. Restart the program\e[0m");
                 }
                 return;
             }
 
-            if (await response.Content.ReadFromJsonAsync<ApiResponse>() is { Data.Posts: { } p })
+            if (await response.Content.ReadFromJsonAsync(SerializerContext.DefaultOverride.ApiResponse) is { Data.Posts: { } p })
             {
                 Console.WriteLine("Downloaded page " + data.Paged);
                 lastRequest = DateTime.UtcNow;
@@ -179,7 +177,7 @@ Console.WriteLine("\e[32mReached continuous existence threshold. Stopping crawl.
 await Task.WhenAll(imgTasks);
 
 Console.Write("\e[32mGet ");
-if (newSession)
+if (settings.NewSession)
     Console.Write(newPostsCount);
 else
     Console.Write(originalCount + " + " + (newPostsCount - originalCount));
@@ -203,7 +201,7 @@ try
 
     Console.WriteLine("Saving " + loggerJsonPath);
     await using var fs = File.OpenAsyncWrite(loggerJsonPath, FileMode.CreateNew);
-    await JsonSerializer.SerializeAsync(fs, myList, options);
+    await JsonSerializer.SerializeAsync(fs, myList, SerializerContext.DefaultOverride.WritePostsList);
 }
 catch (Exception e)
 {
@@ -212,12 +210,14 @@ catch (Exception e)
     Console.WriteLine($"\e[31mSave failed. Backing up {fileName}\e[0m");
     var loggerTempJsonPath = Path.Combine(loggerPath, fileName);
     await using var fs = File.OpenAsyncWrite(loggerTempJsonPath, FileMode.CreateNew);
-    await JsonSerializer.SerializeAsync(fs, myList, options);
+    await JsonSerializer.SerializeAsync(fs, myList, SerializerContext.DefaultOverride.WritePostsList);
 }
+
+Console.ReadKey();
 
 return;
 
-static async Task DownloadThumbnail(HttpClient client, Post post)
+async Task DownloadThumbnail(HttpClient httpClient, Post post)
 {
     var postThumbnailUrl = post.Thumbnail.Url;
     var fileName = post.ThumbnailFileName;
@@ -226,7 +226,7 @@ static async Task DownloadThumbnail(HttpClient client, Post post)
         return;
     try
     {
-        await using var stream = await client.GetStreamAsync(postThumbnailUrl);
+        await using var stream = await httpClient.GetStreamAsync(postThumbnailUrl);
         await using var fileStream = File.OpenAsyncWrite(imgPath, FileMode.CreateNew);
         await stream.CopyToAsync(fileStream);
         Console.WriteLine("Downloaded thumbnail " + fileName);
@@ -242,7 +242,7 @@ static async Task DownloadThumbnail(HttpClient client, Post post)
 
 static string Encode(SearchData data)
 {
-    var u8Str = JsonSerializer.SerializeToUtf8Bytes(data);
+    var u8Str = JsonSerializer.SerializeToUtf8Bytes(data, SerializerContext.DefaultOverride.SearchData);
     var str = Convert.ToBase64String(u8Str);
     return Uri.EscapeDataString(str);
 }
@@ -256,3 +256,17 @@ static SearchData? Decode(string data)
 }
 
 static void WriteException(Exception e) => Console.WriteLine($"\e[90m{e.Message}\e[0m");
+
+[JsonSerializable(typeof(Settings))]
+[JsonSerializable(typeof(SearchData))]
+[JsonSerializable(typeof(ApiResponse))]
+[JsonSerializable(typeof(ReadPostsList))]
+[JsonSerializable(typeof(WritePostsList))]
+public partial class SerializerContext : JsonSerializerContext
+{
+    public static SerializerContext DefaultOverride => field ??= new(new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    });
+}

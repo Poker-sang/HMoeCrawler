@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -34,7 +35,7 @@ public class DateInfoToDateTimeOffsetConverter : JsonConverter<DateTimeOffset>
 {
     public override DateTimeOffset Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        var dateInfo = JsonSerializer.Deserialize<DateInfo>(ref reader, options);
+        var dateInfo = JsonSerializer.Deserialize(ref reader, new DateInfoSerializerContext(new(options)).DateInfo);
         return dateInfo.ToDateTimeOffset();
     }
 
@@ -68,3 +69,6 @@ public class DateInfoToDateTimeOffsetConverter : JsonConverter<DateTimeOffset>
         return $"{(int) (diff.TotalDays / 365)}年前";
     }
 }
+
+[JsonSerializable(typeof(DateInfo))]
+public partial class DateInfoSerializerContext : JsonSerializerContext;

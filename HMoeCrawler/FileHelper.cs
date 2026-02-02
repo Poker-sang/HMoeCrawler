@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace HMoeCrawler;
 
 public static class FileHelper
