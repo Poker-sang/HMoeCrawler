@@ -25,7 +25,12 @@ const int continuousExistenceThreshold = 5;
 Settings? settings = null;
 
 // 记录日志路径
-var loggerPath = Environment.CurrentDirectory;
+var loggerPath =
+#if DEBUG
+    @"D:\HMoeLogger";
+#else
+    Environment.CurrentDirectory;
+#endif
 var loggerImgPath = Path.Combine(loggerPath, "img");
 var loggerJsonPath = Path.Combine(loggerPath, "current.json");
 var loggerLastJsonPath = Path.Combine(loggerPath, "last.json");
@@ -66,7 +71,9 @@ _ = client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", settings.Cook
 
 var postIdSet = new HashSet<int>(1000);
 LinkedList<Post>? postList = null;
+// 上次的项目数
 var originalCount = 0;
+// 本次新项目数
 var newPostsCount = 0;
 var imgTasks = new List<Task>();
 
@@ -77,7 +84,7 @@ if (File.Exists(loggerJsonPath))
     {
         postList = r.Posts;
         if (!settings.NewSession)
-            originalCount = newPostsCount = r.NewPostsCount;
+            originalCount = r.PostsCount;
         foreach (var post in postList)
             if (postIdSet.Add(post.Id))
                 imgTasks.Add(DownloadThumbnail(client, post));
@@ -177,40 +184,51 @@ Console.WriteLine("\e[32mReached continuous existence threshold. Stopping crawl.
 await Task.WhenAll(imgTasks);
 
 Console.Write("\e[32mGet ");
+// 本次的总项目数 = 上次的项目数 + 本次新项目数（如果是新会话则不加上次的项目数）
+var allPostsCount = settings.NewSession
+    ? newPostsCount
+    : originalCount + newPostsCount; 
 if (settings.NewSession)
     Console.Write(newPostsCount);
 else
-    Console.Write(originalCount + " + " + (newPostsCount - originalCount));
+    Console.Write(originalCount + " + " + newPostsCount);
 Console.WriteLine(" new items\e[0m");
 
-var resultPosts = postList.OrderByDescending(t => t.Date);
-var myList = new WritePostsList
+if (newPostsCount is 0)
 {
-    NewPostsCount = newPostsCount,
-    Posts = resultPosts.Take(newPostsCount + continuousExistenceThreshold)
-};
-
-try
-{
-    if (File.Exists(loggerJsonPath))
-    {
-        if (File.Exists(loggerLastJsonPath))
-            File.Delete(loggerLastJsonPath);
-        File.Move(loggerJsonPath, loggerLastJsonPath);
-    }
-
-    Console.WriteLine("Saving " + loggerJsonPath);
-    await using var fs = File.OpenAsyncWrite(loggerJsonPath, FileMode.CreateNew);
-    await JsonSerializer.SerializeAsync(fs, myList, SerializerContext.DefaultOverride.WritePostsList);
+    Console.WriteLine("Not save for no new items");
 }
-catch (Exception e)
+else
 {
-    WriteException(e);
-    var fileName = $"TempLog {DateTime.Now:yyyy.MM.dd HH-mm-ss}.json";
-    Console.WriteLine($"\e[31mSave failed. Backing up {fileName}\e[0m");
-    var loggerTempJsonPath = Path.Combine(loggerPath, fileName);
-    await using var fs = File.OpenAsyncWrite(loggerTempJsonPath, FileMode.CreateNew);
-    await JsonSerializer.SerializeAsync(fs, myList, SerializerContext.DefaultOverride.WritePostsList);
+    var resultPosts = postList.OrderByDescending(t => t.Date);
+    var myList = new WritePostsList
+    {
+        PostsCount = allPostsCount,
+        Posts = resultPosts.Take(allPostsCount + (continuousExistenceThreshold * 4))
+    };
+
+    try
+    {
+        if (File.Exists(loggerJsonPath))
+        {
+            if (File.Exists(loggerLastJsonPath))
+                File.Delete(loggerLastJsonPath);
+            File.Move(loggerJsonPath, loggerLastJsonPath);
+        }
+
+        Console.WriteLine("Saving " + loggerJsonPath);
+        await using var fs = File.OpenAsyncWrite(loggerJsonPath, FileMode.CreateNew);
+        await JsonSerializer.SerializeAsync(fs, myList, SerializerContext.DefaultOverride.WritePostsList);
+    }
+    catch (Exception e)
+    {
+        WriteException(e);
+        var fileName = $"TempLog {DateTime.Now:yyyy.MM.dd HH-mm-ss}.json";
+        Console.WriteLine($"\e[31mSave failed. Backing up {fileName}\e[0m");
+        var loggerTempJsonPath = Path.Combine(loggerPath, fileName);
+        await using var fs = File.OpenAsyncWrite(loggerTempJsonPath, FileMode.CreateNew);
+        await JsonSerializer.SerializeAsync(fs, myList, SerializerContext.DefaultOverride.WritePostsList);
+    }
 }
 
 Console.ReadKey();
