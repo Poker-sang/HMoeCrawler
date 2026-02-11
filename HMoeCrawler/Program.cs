@@ -23,6 +23,8 @@ const int continuousExistenceThreshold = 5;
 // 网站每页项目数（20）
 // const int itemsPerPage = 20;
 Settings? settings = null;
+// 网站域名
+const string domain = "https://www.mhh1.com/";
 
 // 记录日志路径
 var loggerPath =
@@ -65,7 +67,7 @@ if (settings is null)
 
 using var client = new HttpClient();
 client.Timeout = TimeSpan.FromSeconds(8);
-client.DefaultRequestHeaders.Referrer = new("https://www.mhh1.com/search/-");
+client.DefaultRequestHeaders.Referrer = new(domain + "search/-");
 client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0");
 _ = client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", settings.Cookies);
 
@@ -238,6 +240,19 @@ return;
 async Task DownloadThumbnail(HttpClient httpClient, Post post)
 {
     var postThumbnailUrl = post.Thumbnail.Url;
+
+    // 处理相对 URI
+    if (!postThumbnailUrl.IsAbsoluteUri)
+    {
+        var originalString = postThumbnailUrl.OriginalString;
+        // 协议相对 URL (以 // 开头)
+        postThumbnailUrl = originalString.StartsWith("//")
+            ? new Uri("https:" + originalString)
+            // 根相对 URL 或其他相对路径
+            // 使用基础 URL 构建完整 URL
+            : new(new(domain), postThumbnailUrl);
+    }
+
     var fileName = post.ThumbnailFileName;
     var imgPath = Path.Combine(loggerImgPath, post.ThumbnailFileName);
     if (File.Exists(imgPath))

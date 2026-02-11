@@ -54,5 +54,9 @@ public record Post
     [JsonPropertyName("views")]
     public required int Views { get; init; }
 
-    public string ThumbnailFileName => Id + Path.GetExtension(Thumbnail.Url.AbsolutePath);
+    public string ThumbnailFileName =>
+        Id +
+        (Thumbnail.Url.IsAbsoluteUri
+            ? Path.GetExtension(Thumbnail.Url.Segments[^1])
+            : Thumbnail.Url.OriginalString);
 }
