@@ -1,4 +1,7 @@
+using System;
 using System.IO;
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace HMoeCrawler.Models;
@@ -36,4 +39,19 @@ public record SearchData()
 
     [JsonPropertyName("cats")]
     public string[] Cats { get; init; } = [];
+
+    public string Encode()
+    {
+        var u8Str = JsonSerializer.SerializeToUtf8Bytes(this, SerializerContext.DefaultOverride.SearchData);
+        var str = Convert.ToBase64String(u8Str);
+        return Uri.EscapeDataString(str);
+    }
+
+    public static SearchData? Decode(string data)
+    {
+        while (data.Contains('%'))
+            data = Uri.UnescapeDataString(data);
+        var u8Str = Encoding.UTF8.GetString(Convert.FromBase64String(data));
+        return JsonSerializer.Deserialize(u8Str, SerializerContext.DefaultOverride.SearchData);
+    }
 }

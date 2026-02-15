@@ -9,7 +9,9 @@ public record Settings
     /// </summary>
     public required bool NewSession { get; init; }
 
-    public required string Cookies { get; init; }
+    public required string Email { get; init; }
 
-    public required string NonceParam { get; init; }
+    public required string Password { get; init; }
+
+    public string? Cookies { get; set; }
 }

@@ -56,7 +56,7 @@ public record Post
 
     public string ThumbnailFileName =>
         Id +
-        (Thumbnail.Url.IsAbsoluteUri
-            ? Path.GetExtension(Thumbnail.Url.Segments[^1])
+        Path.GetExtension(Thumbnail.Url.IsAbsoluteUri
+            ? Thumbnail.Url.Segments[^1]
             : Thumbnail.Url.OriginalString);
 }
