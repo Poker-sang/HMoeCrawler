@@ -16,7 +16,7 @@ Settings? settings = null;
 // 记录日志路径
 var loggerPath =
 #if DEBUG
-    @"D:\HMoeLogger";
+    @"D:\HMoeCrawler";
 #else
     Environment.CurrentDirectory;
 #endif
@@ -37,17 +37,13 @@ if (!File.Exists(loggerSettingsPath))
 //     "Cookies": "..." // Optional
 // }
 
-await using (var fs = File.OpenAsyncRead(loggerSettingsPath, FileMode.Open))
+try
 {
-    try
-    {
-        if (await JsonSerializer.DeserializeAsync(fs, SerializerContext.DefaultOverride.Settings) is { } s)
-            settings = s;
-    }
-    catch (Exception e)
-    {
-        WriteException(e);
-    }
+    settings = await JsonSerializer.OpenDeserializeAsync(loggerSettingsPath, SerializerContext.DefaultOverride.Settings);
+}
+catch (Exception e)
+{
+    WriteException(e);
 }
 
 if (settings is null)
@@ -59,34 +55,27 @@ session.OnLoginRequired += () => (settings.Email, settings.Password);
 session.CookieRefreshed += async (_, cookie) =>
 {
     settings.Cookies = cookie;
-    await using var fs = File.OpenAsyncWrite(loggerSettingsPath, FileMode.Create);
-    await JsonSerializer.SerializeAsync(fs, settings, SerializerContext.DefaultOverride.Settings);
+    await JsonSerializer.CreateSerializeAsync(loggerSettingsPath, settings, SerializerContext.DefaultOverride.Settings);
     Console.WriteLine("\e[32msettings.json updated\e[0m");
 };
 
-var postIdSet = new HashSet<int>(1000);
-LinkedList<Post>? postList = null;
-// 上次的项目数
-var originalCount = 0;
-// 本次新项目数
-var newPostsCount = 0;
+HashSet<Post>? postSet = null;
 
-if (File.Exists(loggerJsonPath))
+if (File.Exists(loggerJsonPath)
+    && await JsonSerializer.OpenDeserializeAsync(loggerJsonPath, SerializerContext.DefaultOverride.HashSetPost) is { } r)
 {
-    await using var fs = File.OpenAsyncRead(loggerJsonPath, FileMode.Open);
-    if (await JsonSerializer.DeserializeAsync(fs, SerializerContext.DefaultOverride.ReadPostsList) is { } r)
+    postSet = r;
+    foreach (var post in postSet)
     {
-        postList = r.Posts;
-        if (!settings.NewSession)
-            originalCount = r.PostsCount;
-        foreach (var post in postList)
-            if (postIdSet.Add(post.Id))
-                session.DownloadThumbnailAddToList(post, loggerImgPath);
-    }
+        session.DownloadThumbnailAddToList(post, loggerImgPath);
+        if (settings.NewSession)
+            post.IsNew = false;
+    }   
 }
 
-postList ??= [];
+postSet ??= [];
 
+var newItemsCount = 0;
 var continuousExistence = 0;
 var data = new SearchData(1);
 while (true)
@@ -94,13 +83,12 @@ while (true)
     var tempPosts = await session.SearchPageAsync(data);
 
     while (tempPosts.TryPop(out var post))
-        if (postIdSet.Add(post.Id))
+        if (postSet.Add(post))
         {
             Console.WriteLine($"New Item [{post.Id}]: {post.Url}");
+            newItemsCount++;
             if (continuousExistence < continuousExistenceThreshold)
                 continuousExistence = 0;
-            postList.AddFirst(post);
-            newPostsCount++;
             session.DownloadThumbnailAddToList(post, loggerImgPath);
         }
         else
@@ -119,42 +107,31 @@ Console.WriteLine("\e[32mReached continuous existence threshold. Stopping crawl.
 
 await session.WhenAllDownloadAsync();
 
-Console.Write("\e[32mGet ");
-// 本次的总项目数 = 上次的项目数 + 本次新项目数（如果是新会话则不加上次的项目数）
-var allPostsCount = settings.NewSession
-    ? newPostsCount
-    : originalCount + newPostsCount; 
-if (settings.NewSession)
-    Console.Write(newPostsCount);
-else
-    Console.Write(originalCount + " + " + newPostsCount);
-Console.WriteLine(" new items\e[0m");
-
-if (newPostsCount is 0)
+if (newItemsCount is 0)
 {
     Console.WriteLine("Not save for no new items");
 }
 else
 {
-    var resultPosts = postList.OrderByDescending(t => t.Date);
-    var myList = new WritePostsList
-    {
-        PostsCount = allPostsCount,
-        Posts = resultPosts.Take(allPostsCount + (continuousExistenceThreshold * 4))
-    };
+    var resultPosts = postSet.OrderByDescending(t => t.Date).ToList();
+    Console.Write("\e[32mGet ");
+    // 本次的总项目数 = 上次的项目数 + 本次新项目数（如果是新会话则不加上次的项目数）
+    var allPostsCount = settings.NewSession
+        ? newItemsCount
+        : resultPosts.Count(t => t.IsNew);
+    if (!settings.NewSession)
+        Console.Write(allPostsCount - newItemsCount + " + ");
+    Console.WriteLine($"{newItemsCount} new items\e[0m");
+
+    var myList = resultPosts.Take(allPostsCount + (continuousExistenceThreshold * 4)).ToArray();
 
     try
     {
         if (File.Exists(loggerJsonPath))
-        {
-            if (File.Exists(loggerLastJsonPath))
-                File.Delete(loggerLastJsonPath);
-            File.Move(loggerJsonPath, loggerLastJsonPath);
-        }
+            File.Move(loggerJsonPath, loggerLastJsonPath, true);
 
         Console.WriteLine("Saving " + loggerJsonPath);
-        await using var fs = File.OpenAsyncWrite(loggerJsonPath, FileMode.CreateNew);
-        await JsonSerializer.SerializeAsync(fs, myList, SerializerContext.DefaultOverride.WritePostsList);
+        await JsonSerializer.CreateSerializeAsync(loggerJsonPath, myList, SerializerContext.DefaultOverride.IReadOnlyListPost);
     }
     catch (Exception e)
     {
@@ -162,8 +139,7 @@ else
         var fileName = $"TempLog {DateTime.Now:yyyy.MM.dd HH-mm-ss}.json";
         Console.WriteLine($"\e[31mSave failed. Backing up {fileName}\e[0m");
         var loggerTempJsonPath = Path.Combine(loggerPath, fileName);
-        await using var fs = File.OpenAsyncWrite(loggerTempJsonPath, FileMode.CreateNew);
-        await JsonSerializer.SerializeAsync(fs, myList, SerializerContext.DefaultOverride.WritePostsList);
+        await JsonSerializer.CreateSerializeAsync(loggerTempJsonPath, myList, SerializerContext.DefaultOverride.IReadOnlyListPost);
     }
 }
 

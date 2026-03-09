@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 
 namespace HMoeCrawler.Models;
 
-public record Post
+public class Post : IEquatable<Post>
 {
     [JsonPropertyName("id")]
     public required int Id { get; init; }
@@ -54,9 +54,21 @@ public record Post
     [JsonPropertyName("views")]
     public required int Views { get; init; }
 
+    public bool IsNew { get; set; } = true;
+
     public string ThumbnailFileName =>
         Id +
         Path.GetExtension(Thumbnail.Url.IsAbsoluteUri
             ? Thumbnail.Url.Segments[^1]
             : Thumbnail.Url.OriginalString);
+
+
+    /// <inheritdoc />
+    public bool Equals(Post? other) => other is not null && (ReferenceEquals(this, other) || Id == other.Id);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => Equals(obj as Post);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => Id;
 }
