@@ -59,11 +59,11 @@ public class HMoeSession : IDisposable
     {
         _ = Client.DefaultRequestHeaders.Remove("Cookie");
         if (value is null)
-            _loginNonce = null;
+            await RefreshLoginNonceAsync(true);
         else
         {
             Client.DefaultRequestHeaders.Add("Cookie", value);
-            _loginNonce = await FetchNonceAsync();
+            await RefreshLoginNonceAsync();
         }
     }
 
@@ -174,6 +174,17 @@ public class HMoeSession : IDisposable
 
     private string? _loginNonce;
 
+    private async Task RefreshLoginNonceAsync(bool setNull = false)
+    {
+        if (setNull)
+        {
+            _loginNonce = null;
+            return;
+        }
+        _loginNonce = await FetchNonceAsync();
+        _ = await SignAsync(_loginNonce);
+    }
+
     public async Task<Stack<Post>> SearchPageAsync(SearchData data)
     {
         var coolDown = DefaultCoolDown;
@@ -213,7 +224,7 @@ public class HMoeSession : IDisposable
                 }
 
                 await RefreshCookieAsync();
-                _loginNonce = await FetchNonceAsync();
+                await RefreshLoginNonceAsync();
             }
             catch (Exception e)
             {
@@ -225,6 +236,21 @@ public class HMoeSession : IDisposable
             }
 
         return tempPosts;
+    }
+
+    public async Task<bool> SignAsync(string nonce)
+    {
+        Console.WriteLine("Signing");
+        var url = $"{WpAdminDomain}?_nonce={nonce}&action=9f9fa05823795c1c74e8c27e8d5e6930&type=goSign";
+        using var responseJson = await Client.GetAsync(url);
+        if (!responseJson.IsSuccessStatusCode)
+            return false;
+        var response = await responseJson.Content.ReadFromJsonAsync(SerializerContext.Default.ApiResponse)
+                       ?? throw new InvalidOperationException("Failed to deserialize response.");
+        // data:{imgUrl: ""}
+        var status = response.Code is 0;
+        Console.WriteLine($"Sign {(status ? "success" : "failed")}: {response.Message}");
+        return status;
     }
 
     private static void WriteException(Exception e) => Console.WriteLine($"\e[90m{e.Message}\e[0m");
